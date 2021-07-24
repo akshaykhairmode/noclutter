@@ -3,8 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log"
 	"os"
-	"syscall"
+	"reflect"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
@@ -12,94 +13,133 @@ import (
 	"golang.org/x/crypto/ssh/terminal"
 )
 
-var uname, server, port, mailbox string
-var help bool
+type logger struct{}
+
+type Noclutter struct {
+	uname, server, port, mailbox string
+	help                         bool
+	red, green                   func(a ...interface{}) string
+}
 
 const (
 	MailBoxLimit = 50
+	ctrlc        = "CTRL+C to cancel"
 )
 
-//TODO :: Need to refactor
+var NC Noclutter
+
+func (l logger) Write(p []byte) (n int, err error) {
+	return fmt.Print(">" + string(p))
+}
+
 func main() {
 
-	red := color.New(color.FgRed).SprintFunc()
-	green := color.New(color.FgGreen).SprintFunc()
+	log.SetFlags(0)
+	log.SetOutput(new(logger))
 
-	flag.StringVar(&mailbox, "m", "", "Mailbox which needs to be cleared")
-	flag.StringVar(&server, "s", "", "Email Server host / ip (Required)")
-	flag.StringVar(&port, "p", "", "Port on which to connect (Required)")
-	flag.StringVar(&uname, "u", "", "Username for the email account (Required)")
-	flag.BoolVar(&help, "h", false, "Help flag prints available options available")
+	initialize()
+
+	if err := run(); err != nil {
+		log.Printf("Error : %s\n", NC.red(err))
+	}
+
+}
+
+func run() error {
+
+	var pass, proceed string
+	var err error
+	var seq []uint32
+	var allMailBoxes []string
+
+	log.Printf("Connecting to %s", NC.green(NC.server))
+
+	// Connect to server
+	c, err := client.DialTLS(NC.getHost(), nil)
+	if err != nil {
+		return err
+	}
+	log.Println("Connected")
+	defer c.Logout()
+
+	//Get password
+	if pass, err = getPasswordFromUser(); err != nil {
+		return err
+	}
+
+	//Login to IMAP Server
+	if err = c.Login(NC.uname, pass); err != nil {
+		return err
+	}
+
+	//Get All Mailboxes from the server
+	if allMailBoxes, err = getAllMailboxes(c); err != nil {
+		return err
+	}
+
+	//Select mailbox for modification
+	if err = selectMailbox(c, allMailBoxes); err != nil {
+		return err
+	}
+
+	//search the emails based on the pattern passed for the subject
+	if seq, err = searchEmails(c); err != nil {
+		return err
+	}
+
+	//Get confirmation for deletion of the number of emails found
+	if err := getUserInput(&proceed, "Do you want to proceed with deletion ? [%s/%s] : ", NC.green("Y"), NC.red("n")); err != nil {
+		return err
+	}
+
+	if proceed != "Y" {
+		fmt.Printf("Exiting\n")
+		return nil
+	}
+
+	//Mark mails as deleted and expunge them
+	if err := deleteEmails(c, seq); err != nil {
+		return err
+	}
+
+	return nil
+
+}
+
+func initialize() {
+
+	NC.red = color.New(color.FgRed).SprintFunc()
+	NC.green = color.New(color.FgGreen).SprintFunc()
+
+	flag.StringVar(&NC.mailbox, "m", "", "Mailbox which needs to be cleared")
+	flag.StringVar(&NC.server, "s", "", "Email Server host / ip (Required)")
+	flag.StringVar(&NC.port, "p", "", "Port on which to connect (Required)")
+	flag.StringVar(&NC.uname, "u", "", "Username for the email account (Required)")
+	flag.BoolVar(&NC.help, "h", false, "Help flag prints available options available")
 	flag.Parse()
 
-	if help {
+	if NC.help {
 		flag.PrintDefaults()
 		os.Exit(0)
 	}
 
-	if uname == "" || server == "" || port == "" {
-		fmt.Printf("Please Pass the required flags\n")
+	if NC.uname == "" || NC.server == "" || NC.port == "" {
+		log.Println("Please Pass the required flags")
 		flag.PrintDefaults()
 		os.Exit(1)
 	}
 
-	fmt.Print("Please enter password : ")
+}
 
-	//TODO :: Fix terminal breaking if done ctrl + c when waiting for password
-	pass, err := terminal.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		fmt.Printf("Error : %s\n", red(err))
-		return
-	}
+func (nc Noclutter) getHost() string {
+	return nc.server + ":" + nc.port
+}
 
-	fmt.Println("\nConnecting to server...")
-
-	// Connect to server
-	c, err := client.DialTLS(server+":"+port, nil)
-	if err != nil {
-		fmt.Printf("Error : %s,\n", red(err))
-		return
-	}
-	fmt.Printf("Connected to %s\n", green(server))
-
-	defer c.Logout()
-
-	if err := c.Login(uname, string(pass)); err != nil {
-		fmt.Printf("Error : %s\n", red(err))
-		return
-	}
-
-	allMailBoxes, err := getAllMailboxes(c)
-	if err != nil {
-		fmt.Printf("Error : %s\n", red(err))
-		return
-	}
-
-	for index, mbox := range allMailBoxes {
-		fmt.Printf("%v - %s\n", green(index+1), mbox)
-	}
-
-	var selectedMailbox int
-
-	fmt.Printf("\nPlease select a mailbox from which to delete mails, %s : ", green("Enter the number and press enter"))
-	if _, err := fmt.Scanln(&selectedMailbox); err != nil {
-		fmt.Printf("Error : %s\n", red(err))
-		return
-	}
-
-	status, err := c.Select(allMailBoxes[selectedMailbox-1], false)
-	if err != nil {
-		fmt.Printf("Error : %s\n", err)
-		return
-	}
-
-	fmt.Printf("Selected : %s\n", green(status.Name))
+func searchEmails(c *client.Client) ([]uint32, error) {
 
 	var search string
-	fmt.Print("Please specify the pattern for SUBJECT for searching mails before deleting [* for all]\n")
-	if _, err := fmt.Scan(&search); err != nil {
-		fmt.Printf("Error : %s\n", err)
-		return
+	if err := getUserInput(&search, "Please specify the pattern for SUBJECT for searching mails before deleting [* for all][%s]", NC.red(ctrlc)); err != nil {
+		return []uint32{}, err
 	}
 
 	criteria := imap.NewSearchCriteria()
@@ -110,46 +150,103 @@ func main() {
 
 	seq, err := c.Search(criteria)
 	if err != nil {
-		fmt.Printf("Error : %s\n", err)
-		return
+		return []uint32{}, err
 	}
 
-	fmt.Printf("Total Emails Found for this search are : %s\n", green(len(seq)))
-	fmt.Printf("Do you want to proceed with deletion ? [%s/%s] : ", green("Y"), red("n"))
-
-	var proceed string
-	if _, err := fmt.Scanln(&proceed); err != nil {
-		fmt.Printf("Error : %s\n", err)
-		return
+	if len(seq) <= 0 {
+		return []uint32{}, fmt.Errorf(NC.red("No Mails matching this search criteria"))
 	}
 
-	if proceed != "Y" {
-		fmt.Printf("Exiting\n")
-		return
+	log.Printf("Total Emails Found for this search are : %s\n", NC.green(len(seq)))
+
+	return seq, nil
+}
+
+func selectMailbox(c *client.Client, allMailBoxes []string) error {
+
+	//Print available mailboxes
+	for index, mbox := range allMailBoxes {
+		fmt.Printf("%v - %s\n", NC.green(index+1), mbox)
 	}
+
+	var selectedMailbox int
+	if err := getUserInput(&selectedMailbox, "Please select a mailbox from which to delete mails, [%s][%s]: ", NC.green("Enter the number and press enter"), NC.red(ctrlc)); err != nil {
+		return err
+	}
+
+	//Select the mailbox
+	status, err := c.Select(allMailBoxes[selectedMailbox-1], false)
+	if err != nil {
+		return err
+	}
+
+	log.Printf("Selected : %s\n", NC.green(status.Name))
+
+	return nil
+}
+
+func getUserInput(v interface{}, msgToPrint string, vals ...interface{}) error {
+
+	if v == nil {
+		return fmt.Errorf("Got nil input")
+	}
+
+	if reflect.ValueOf(v).Kind() != reflect.Ptr {
+		return fmt.Errorf("Input Must be a pointer")
+	}
+
+	log.Printf(msgToPrint+"\n", vals...)
+
+	_, err := fmt.Scanln(v)
+
+	return err
+
+}
+
+func getPasswordFromUser() (string, error) {
+
+	log.Println("Please enter password")
+
+	state, err := terminal.MakeRaw(0)
+	if err != nil {
+		return "", err
+	}
+	defer terminal.Restore(0, state)
+	term := terminal.NewTerminal(os.Stdout, "")
+	pass, err := term.ReadPassword("")
+	if err != nil {
+		return "", err
+	}
+	return pass, nil
+
+}
+
+func deleteEmails(c *client.Client, seq []uint32) error {
+
+	log.Println("Deletion Started")
 
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(seq...)
 
 	if err := c.Store(seqset, imap.AddFlags, "\\Deleted", nil); err != nil {
-		fmt.Printf("Error : %s", err)
-		return
+		return err
 	}
 
-	fmt.Println("Mark as deleted done")
+	log.Println("Mark as deleted done")
 
 	seqChan := make(chan uint32, len(seq))
 	if err := c.Expunge(seqChan); err != nil {
-		fmt.Printf("Error : %s", err)
-		return
+		return err
 	}
 
-	fmt.Print("Expunge Completed for seq : ")
+	log.Print("Expunge Completed for seq : ")
 	for s := range seqChan {
 		fmt.Printf("%d ", s)
 	}
 
-	fmt.Println()
+	log.Println()
+
+	return nil
 }
 
 func getAllMailboxes(c *client.Client) ([]string, error) {
@@ -162,7 +259,7 @@ func getAllMailboxes(c *client.Client) ([]string, error) {
 		return allMailbox, err
 	}
 
-	fmt.Println("Mailboxes:")
+	log.Printf("Mailboxes:")
 	for m := range mailboxes {
 		allMailbox = append(allMailbox, m.Name)
 	}

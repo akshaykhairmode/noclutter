@@ -1,2 +1,3 @@
 # noclutter
-Delete Emails In bulk when your email client cannot handle too many emails
+
+Small Tool to delete emails via a command on a remote IMAP server.
