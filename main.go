@@ -254,7 +254,9 @@ func deleteEmails(c *client.Client, seq []uint32) error {
 	log.Println("Deletion Started")
 
 	item := imap.FormatFlagsOp(imap.AddFlags, true)
-	if err := c.Store(seqset, item, imap.DeletedFlag, nil); err != nil {
+	flags := []interface{}{imap.DeletedFlag}
+
+	if err := c.Store(seqset, item, flags, nil); err != nil {
 		return err
 	}
 
@@ -264,7 +266,7 @@ func deleteEmails(c *client.Client, seq []uint32) error {
 		return err
 	}
 
-	log.Printf("Expunge Completed for seq : %v\n", len(seq))
+	log.Printf("Expunge Completed for seq length : %v\n", len(seq))
 
 	return nil
 }
