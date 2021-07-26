@@ -13,4 +13,12 @@ Then you can run the below command to execute
 
 Example :  `$GOBIN/noclutter -s=imap.gmail.com -p=993 -u=username@gmail.com`
 
+**Options** 
+
+ - -f allows insecure tls certificate
+ - -s imap server host 
+ - -p imap server port
+ - -u username / email id
+ - -h prints the available options
+
 **Currently email filtering works only on subject.**

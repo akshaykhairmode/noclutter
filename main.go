@@ -18,9 +18,9 @@ import (
 type logger struct{}
 
 type Noclutter struct {
-	uname, server, port, mailbox string
-	help, force                  bool
-	red, green                   func(a ...interface{}) string
+	uname, server, port string
+	help, force         bool
+	red, green          func(a ...interface{}) string
 }
 
 const (
@@ -119,7 +119,6 @@ func initialize() {
 	NC.red = color.New(color.FgRed).SprintFunc()
 	NC.green = color.New(color.FgGreen).SprintFunc()
 
-	flag.StringVar(&NC.mailbox, "m", "", "Mailbox which needs to be cleared")
 	flag.StringVar(&NC.server, "s", "", "Email Server host / ip (Required)")
 	flag.StringVar(&NC.port, "p", "", "Port on which to connect (Required)")
 	flag.StringVar(&NC.uname, "u", "", "Username for the email account (Required)")
