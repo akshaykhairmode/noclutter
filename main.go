@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
@@ -17,7 +18,7 @@ type logger struct{}
 
 type Noclutter struct {
 	uname, server, port, mailbox string
-	help                         bool
+	help, force                  bool
 	red, green                   func(a ...interface{}) string
 }
 
@@ -54,8 +55,14 @@ func run() error {
 
 	log.Printf("Connecting to %s", NC.green(NC.server))
 
+	tlsConfig := &tls.Config{}
+
+	if NC.force {
+		tlsConfig.InsecureSkipVerify = true
+	}
+
 	// Connect to server
-	c, err := client.DialTLS(NC.getHost(), nil)
+	c, err := client.DialTLS(NC.getHost(), tlsConfig)
 	if err != nil {
 		return err
 	}
@@ -116,6 +123,7 @@ func initialize() {
 	flag.StringVar(&NC.port, "p", "", "Port on which to connect (Required)")
 	flag.StringVar(&NC.uname, "u", "", "Username for the email account (Required)")
 	flag.BoolVar(&NC.help, "h", false, "Help flag prints available options available")
+	flag.BoolVar(&NC.force, "f", false, "force, allows insecure check when dialing")
 	flag.Parse()
 
 	if NC.help {
