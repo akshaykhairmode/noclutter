@@ -251,7 +251,9 @@ func deleteEmails(c *client.Client, seq []uint32) error {
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(seq...)
 
-	if err := c.Store(seqset, imap.AddFlags, "\\Deleted", nil); err != nil {
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+
+	if err := c.Store(seqset, item, imap.DeletedFlag, nil); err != nil {
 		return err
 	}
 
@@ -262,12 +264,7 @@ func deleteEmails(c *client.Client, seq []uint32) error {
 		return err
 	}
 
-	log.Print("Expunge Completed for seq : ")
-	for s := range seqChan {
-		fmt.Printf("%d ", s)
-	}
-
-	log.Println()
+	log.Printf("Expunge Completed for seq : %v\n", len(seqChan))
 
 	return nil
 }
