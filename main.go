@@ -246,25 +246,25 @@ func getPasswordFromUser() (string, error) {
 
 func deleteEmails(c *client.Client, seq []uint32) error {
 
-	log.Println("Deletion Started")
+	log.Printf("Some sample seq are : %v %v\n", seq[0], seq[len(seq)-1])
 
 	seqset := new(imap.SeqSet)
 	seqset.AddNum(seq...)
 
-	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	log.Println("Deletion Started")
 
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
 	if err := c.Store(seqset, item, imap.DeletedFlag, nil); err != nil {
 		return err
 	}
 
 	log.Println("Mark as deleted done")
 
-	seqChan := make(chan uint32, len(seq))
-	if err := c.Expunge(seqChan); err != nil {
+	if err := c.Expunge(nil); err != nil {
 		return err
 	}
 
-	log.Printf("Expunge Completed for seq : %v\n", len(seqChan))
+	log.Printf("Expunge Completed for seq : %v\n", len(seq))
 
 	return nil
 }
