@@ -1,12 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"flag"
 	"fmt"
 	"log"
 	"os"
-	"reflect"
+	"strconv"
 
 	"github.com/emersion/go-imap"
 	"github.com/emersion/go-imap/client"
@@ -95,7 +96,7 @@ func run() error {
 	}
 
 	//Get confirmation for deletion of the number of emails found
-	if err := getUserInput(&proceed, "Do you want to proceed with deletion ? [%s/%s] : ", NC.green("Y"), NC.red("n")); err != nil {
+	if proceed, err = getUserInput("Do you want to proceed with deletion ? [%s/%s] : ", NC.green("Y"), NC.red("n")); err != nil {
 		return err
 	}
 
@@ -146,7 +147,9 @@ func (nc Noclutter) getHost() string {
 func searchEmails(c *client.Client) ([]uint32, error) {
 
 	var search string
-	if err := getUserInput(&search, "Please specify the pattern for SUBJECT for searching mails before deleting [* for all][%s]", NC.red(ctrlc)); err != nil {
+	var err error
+
+	if search, err = getUserInput("Please specify the pattern for SUBJECT for searching mails before deleting [* for all][%s]", NC.red(ctrlc)); err != nil {
 		return []uint32{}, err
 	}
 
@@ -177,13 +180,25 @@ func selectMailbox(c *client.Client, allMailBoxes []string) error {
 		fmt.Printf("%v - %s\n", NC.green(index+1), mbox)
 	}
 
-	var selectedMailbox int
-	if err := getUserInput(&selectedMailbox, "Please select a mailbox from which to delete mails, [%s][%s]: ", NC.green("Enter the number and press enter"), NC.red(ctrlc)); err != nil {
+	var status *imap.MailboxStatus
+	var selectedMailbox string
+	var selectedMailboxInt int
+	var err error
+
+	if selectedMailbox, err = getUserInput("Please select a mailbox from which to delete mails, [%s][%s]: ", NC.green("Enter the number and press enter"), NC.red(ctrlc)); err != nil {
 		return err
 	}
 
+	if selectedMailboxInt, err = strconv.Atoi(selectedMailbox); err != nil {
+		return fmt.Errorf("Please enter a valid number : %s", err)
+	}
+
+	if selectedMailboxInt <= 0 || selectedMailboxInt > len(allMailBoxes) {
+		return fmt.Errorf("Number should be within listed mailboxes")
+	}
+
 	//Select the mailbox
-	status, err := c.Select(allMailBoxes[selectedMailbox-1], false)
+	status, err = c.Select(allMailBoxes[selectedMailboxInt-1], false)
 	if err != nil {
 		return err
 	}
@@ -193,22 +208,22 @@ func selectMailbox(c *client.Client, allMailBoxes []string) error {
 	return nil
 }
 
-func getUserInput(v interface{}, msgToPrint string, vals ...interface{}) error {
-
-	if v == nil {
-		return fmt.Errorf("Got nil input")
-	}
-
-	if reflect.ValueOf(v).Kind() != reflect.Ptr {
-		return fmt.Errorf("Input Must be a pointer")
-	}
+func getUserInput(msgToPrint string, vals ...interface{}) (string, error) {
 
 	log.Printf(msgToPrint+"\n", vals...)
 
-	_, err := fmt.Scanln(v)
+	s := bufio.NewScanner(os.Stdin)
 
-	return err
+	for s.Scan() {
+		t := s.Text()
+		if t == "" {
+			continue
+		}
 
+		return t, nil
+	}
+
+	return "", fmt.Errorf("Could not get user input")
 }
 
 func getPasswordFromUser() (string, error) {
