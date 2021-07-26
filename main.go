@@ -19,14 +19,11 @@ type logger struct{}
 
 type Noclutter struct {
 	uname, server, port string
-	help, force         bool
+	help, force, env    bool
 	red, green          func(a ...interface{}) string
 }
 
-const (
-	MailBoxLimit = 50
-	ctrlc        = "CTRL+C to cancel"
-)
+const ctrlc = "CTRL+C to cancel"
 
 var NC Noclutter
 
@@ -124,6 +121,7 @@ func initialize() {
 	flag.StringVar(&NC.uname, "u", "", "Username for the email account (Required)")
 	flag.BoolVar(&NC.help, "h", false, "Help flag prints available options available")
 	flag.BoolVar(&NC.force, "f", false, "force, allows insecure check when dialing")
+	flag.BoolVar(&NC.env, "e", false, "Env Mode, will get password from ENV Variable (NOCLUTTER_PASS) if set")
 	flag.Parse()
 
 	if NC.help {
@@ -227,6 +225,12 @@ func getUserInput(msgToPrint string, vals ...interface{}) (string, error) {
 
 func getPasswordFromUser() (string, error) {
 
+	if NC.env { //if env mode is enabled, if pass not present prompt user.
+		if pass := os.Getenv("NOCLUTTER_PASS"); pass != "" {
+			return pass, nil
+		}
+	}
+
 	log.Println("Please enter password")
 
 	state, err := terminal.MakeRaw(0)
@@ -274,16 +278,24 @@ func getAllMailboxes(c *client.Client) ([]string, error) {
 
 	allMailbox := []string{}
 
-	mailboxes := make(chan *imap.MailboxInfo, MailBoxLimit)
+	mailboxes := make(chan *imap.MailboxInfo, 10)
+	done := make(chan struct{}, 1)
+
+	go func() {
+		//Start Reading from mailboxes channel
+		log.Printf("Mailboxes:")
+		for m := range mailboxes {
+			allMailbox = append(allMailbox, m.Name)
+		}
+		done <- struct{}{}
+	}()
 
 	if err := c.List("", "*", mailboxes); err != nil {
 		return allMailbox, err
 	}
 
-	log.Printf("Mailboxes:")
-	for m := range mailboxes {
-		allMailbox = append(allMailbox, m.Name)
-	}
+	//wait for all mailboxes to be read
+	<-done
 
 	return allMailbox, nil
 }
